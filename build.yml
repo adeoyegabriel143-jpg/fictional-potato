@@ -1,0 +1,97 @@
+name: Build Circuit Lab APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Generate Android project
+        run: |
+          set -e
+          D=android/app/src/main
+          mkdir -p $D/java/com/example/circuitlab $D/assets
+          cp index.html $D/assets/index.html
+          cd android
+          cat > settings.gradle <<'E'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = 'HillRace'
+          include ':app'
+          E
+          cat > build.gradle <<'E'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          E
+          cat > app/build.gradle <<'E'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.example.circuitlab'
+              compileSdk 34
+              defaultConfig { applicationId 'com.example.circuitlab'; minSdk 24; targetSdk 34; versionCode 1; versionName '1.0' }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          E
+          cat > app/src/main/AndroidManifest.xml <<'E'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="Circuit Lab" android:theme="@android:style/Theme.NoTitleBar.Fullscreen" android:hardwareAccelerated="true">
+                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="fullSensor" android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          E
+          cat > app/src/main/java/com/example/circuitlab/MainActivity.java <<'E'
+          package com.example.circuitlab;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          public class MainActivity extends Activity {
+              private WebView web;
+              @Override protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  web = new WebView(this);
+                  setContentView(web);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  web.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                  web.setOnLongClickListener(v -> true);
+                  web.setHapticFeedbackEnabled(false);
+                  web.setWebViewClient(new WebViewClient());
+                  web.loadUrl("file:///android_asset/index.html");
+              }
+              @Override public void onWindowFocusChanged(boolean focus) {
+                  super.onWindowFocusChanged(focus);
+                  if (focus) web.setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+              }
+              @Override protected void onPause() { super.onPause(); web.onPause(); }
+              @Override protected void onResume() { super.onResume(); web.onResume(); }
+          }
+          E
+      - name: Build debug APK
+        run: cd android && gradle assembleDebug --no-daemon
+      - name: Publish APK as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "build-${{ github.run_number }}" android/app/build/outputs/apk/debug/app-debug.apk --title "Circuit Lab build ${{ github.run_number }}" --notes "Install app-debug.apk on your Android phone."
